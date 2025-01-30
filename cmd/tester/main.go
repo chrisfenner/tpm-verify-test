@@ -2,7 +2,6 @@
 package main
 
 import (
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -146,12 +145,6 @@ func mainErr() error {
 }
 
 func runTest(key *ecdsa.PrivateKey, tpm transport.TPM, nameAlg tpm2.TPMIAlgHash, schemeAlg tpm2.TPMIAlgHash) error {
-	// Note that we use the name algorithm, and not the scheme algorithm, for the signature below.
-	hashAlg, err := nameAlg.Hash()
-	if err != nil {
-		return err
-	}
-
 	keyPub := tpm2.New2B(getPub(key.PublicKey, nameAlg, schemeAlg))
 
 	load := tpm2.LoadExternal{
@@ -190,7 +183,8 @@ func runTest(key *ecdsa.PrivateKey, tpm transport.TPM, nameAlg tpm2.TPMIAlgHash,
 
 	// Sign the empty policy (which is the current value of the policy session we just started) and try to use it for PolicyAuthorize
 	toBeSigned := make([]byte, 32)
-	ticket, err := signVerify(key, loaded.ObjectHandle, tpm, toBeSigned, hashAlg)
+	// Note that we use the name algorithm, and not the scheme algorithm, for the signature.
+	ticket, err := signVerify(key, loaded.ObjectHandle, tpm, toBeSigned, nameAlg)
 	if err != nil {
 		return err
 	}
@@ -212,8 +206,9 @@ func runTest(key *ecdsa.PrivateKey, tpm transport.TPM, nameAlg tpm2.TPMIAlgHash,
 	return nil
 }
 
-func signVerify(key *ecdsa.PrivateKey, verifier tpm2.TPMHandle, tpm transport.TPM, message []byte, hashFunction crypto.Hash) (*tpm2.TPMTTKVerified, error) {
-	h := hashFunction.New()
+func signVerify(key *ecdsa.PrivateKey, verifier tpm2.TPMHandle, tpm transport.TPM, message []byte, hashAlg tpm2.TPMIAlgHash) (*tpm2.TPMTTKVerified, error) {
+	alg, err := hashAlg.Hash()
+	h := alg.New()
 	h.Write(message)
 	digest := h.Sum(nil)
 
@@ -230,7 +225,7 @@ func signVerify(key *ecdsa.PrivateKey, verifier tpm2.TPMHandle, tpm transport.TP
 		Signature: tpm2.TPMTSignature{
 			SigAlg: tpm2.TPMAlgECDSA,
 			Signature: tpm2.NewTPMUSignature(tpm2.TPMAlgECDSA, &tpm2.TPMSSignatureECC{
-				Hash: tpm2.TPMAlgSHA256,
+				Hash: hashAlg,
 				SignatureR: tpm2.TPM2BECCParameter{
 					Buffer: r.Bytes(),
 				},
